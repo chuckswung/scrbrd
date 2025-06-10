@@ -107,6 +107,45 @@ struct AppState {
     is_refreshing: bool,
 }
 
+// helper function to extract inning number from text
+fn extract_inning_number(text: &str) -> Option<u32> {
+    let ordinals = [ 
+        ("1st", 1), ("2nd", 2), ("3rd", 3), ("4th", 4), ("5th", 5), 
+        ("6th", 6), ("7th", 7), ("8th", 8), ("9th", 9), ("10th", 10), 
+        ("11th", 11), ("12th", 12), ("13th", 13), ("14th", 14), ("15th", 15), 
+    ];
+
+    for (ordinal, number) in ordinals.iter() {
+        if text.contains(ordinal) {
+            return Some(*number);
+        }
+    }
+
+    // simple pattern matching for digits
+    let words: Vec<&str> = text.split_whitespace().collect();
+    for (i, word) in words.iter().enumerate() {
+        if let Ok(num) = word.parse::<u32>() {
+            // check if next word suggests this is an inning
+            if i + 1 < words.len() {
+                let next_word = words[i + 1].to_lowercase();
+                if next_word.contains("inning") || next_word.contains("inn") {
+                    return Some(num);
+                }
+            }
+
+            // or if it's preceded by inning-esque words
+            if i > 0 {
+                let prev_word = words[i - 1].to_lowercase();
+                if prev_word.contains("inning") || prev_word.contains("inn") {
+                    return Some(num);
+                }
+            }
+        }
+    }
+
+    None
+}
+
 impl AppState {
     fn new(league: String, team: Option<String>) -> Self {
         Self {
@@ -140,7 +179,7 @@ impl AppState {
         let client = reqwest::Client::new();
         let response = client
             .get(&url)
-            .header("User-Agent", "scrbrd/1.0")
+            .header("User-Agent", "scrbrd/0.1.0")
             .send()
             .await?;
 
@@ -286,14 +325,23 @@ impl AppState {
                         _ => format!("P{}", status.period),
                     },
                     "mlb" | "baseball" => {
-                        if status.period <= 9 {
-                            if status.display_clock.contains("Top") {
-                                format!("T{}", status.period)
+                        // try to parse inning info
+                        if let Some(inning_info) = self.parse_baseball_inning(status) {
+                            inning_info
+                        } else if status.period <= 9 {
+                            // fallback: try to determine from short_detail or detail
+                            if status.status_type.short_detail.to_lowercase().contains("bot") ||
+                                status.status_type.detail.to_lowercase().contains("bot") ||
+                                status.status_type.short_detail.to_lowercase().contains("bottom") {
+                                    format!("B{}", status.period)
+                            } else if status.status_type.short_detail.to_lowercase().contains("top") ||
+                                    status.status_type.detail.to_lowercase().contains("top") {
+                                    format!("T{}", status.period)
                             } else {
-                                format!("B{}", status.period)
+                                format!("{}", status.period)
                             }
                         } else {
-                            "Extra".to_string()
+                            format!("{}", status.period)
                         }
                     },
                     "mls" | "nwsl" | "premier" | "epl" | "soccer" => {
@@ -308,7 +356,7 @@ impl AppState {
                     _ => format!("{} - {}", status.period, status.display_clock),
                 };
 
-                format!("🔴 live - {}", period_name)
+                format!("live - {}", period_name)
             },
             "post" => {
                 if status.status_type.completed {
@@ -319,6 +367,41 @@ impl AppState {
             },
             _ => status.status_type.short_detail.clone(),
         }
+    }
+
+    // helper function to parse inning information
+    fn parse_baseball_inning(&self, status: &Status) -> Option<String> {
+        // check various fields for inning info
+        let sources = vec![
+            &status.status_type.short_detail,
+            &status.status_type.detail,
+            &status.status_type.description,
+            &status.display_clock,
+        ];
+
+        for source in sources {
+            let source_lower = source.to_lowercase();
+
+            // look for patterns like "top 3rd," "bot 5th," etc.
+            if source_lower.contains("top") {
+                if let Some(inning) = extract_inning_number(&source_lower) {
+                    return Some(format!("T{}", inning));
+                }
+            } else if source_lower.contains("bot") || source_lower.contains("bottom") {
+                if let Some(inning) = extract_inning_number(&source_lower) {
+                    return Some(format!("B{}", inning));
+                }
+            }
+            
+            // look for "mid 3rd" or similar
+            if source_lower.contains("mid") {
+                if let Some(inning) = extract_inning_number(&source_lower) {
+                    return Some(format!("M{}", inning));
+                }
+            }
+        }
+
+        None
     }
 }
 
@@ -339,14 +422,14 @@ async fn render_scoreboard(app: &mut AppState) -> Result<(), Box<dyn Error>> {
 
         terminal.draw(|f| {
             let chunks = Layout::default()
-                .direction(Direction::Vertical)
-                .margin(1)
-                .constraints([
-                    Constraint::Length(3),
-                    Constraint::Min(8),
-                    Constraint::Length(3),
-                ].as_ref())
-                .split(f.size());
+            .direction(Direction::Vertical)
+            .margin(1)
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Min(8),
+                Constraint::Length(3),
+            ].as_ref())
+            .split(f.size());
 
             // calculate these variables at the top so they're in scope for the entire function
             let filtered_events = app.get_filtered_events();
@@ -356,268 +439,268 @@ async fn render_scoreboard(app: &mut AppState) -> Result<(), Box<dyn Error>> {
 
             // header with refresh indicator
             let refresh_indicator = if app.is_refreshing {
-                " ↻"
+            " ↻"
             } else {
                 ""
-            };
-            
-            let title = match &app.team_filter {
-                Some(team) => format!("{} - {}{}", app.selected_league.to_uppercase(), team.to_uppercase(), refresh_indicator),
-                None => format!("{} scrbrd{}", app.selected_league.to_lowercase(), refresh_indicator),
-            };
-            
-            let header = Paragraph::new(title)
-                .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
-                .alignment(Alignment::Center) 
-                .block(Block::default().borders(Borders::ALL));
-            f.render_widget(header, chunks[0]);
+    };
+        
+    let title = match &app.team_filter {
+        Some(team) => format!("{} - {}{}", app.selected_league.to_uppercase(), team.to_uppercase(), refresh_indicator),
+        None => format!("{} scrbrd{}", app.selected_league.to_lowercase(), refresh_indicator),
+    };
+        
+    let header = Paragraph::new(title)
+    .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+    .alignment(Alignment::Center) 
+    .block(Block::default().borders(Borders::ALL));
+    f.render_widget(header, chunks[0]);
 
-            // main content
-            if let Some(ref error) = app.error_message {
-                let error_msg = Paragraph::new(format!("error: {}", error))
-                    .style(Style::default().fg(Color::Red))
-                    .alignment(Alignment::Center)
-                    .block(Block::default().borders(Borders::ALL));
-                f.render_widget(error_msg, chunks[1]);
-            } else {
-                if filtered_events.is_empty() {
-                    let no_games = Paragraph::new("no games found :c")
-                        .style(Style::default().fg(Color::Gray))
-                        .alignment(Alignment::Center)
-                        .block(Block::default().borders(Borders::ALL));
-                    f.render_widget(no_games, chunks[1]);
-                } else {
-                    // check if we need scrolling
-                    let all_lines = app.get_scrollable_lines();
-                    let needs_scrolling = all_lines.len() > content_height;
-                    
-                    if can_fit_two_columns && filtered_events.len() > 1 {
-                        // two-column layout with scrolling support
-                        let game_chunks = Layout::default()
-                            .direction(Direction::Horizontal)
-                            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-                            .split(chunks[1]);
-                        
-                        // get all events for scrolling
-                        let start_event = if needs_scrolling {
-                            (app.scroll_offset / 4).min(filtered_events.len().saturating_sub(1))
-                        } else {
-                            0
-                        };
-                        
-                        let visible_events = if needs_scrolling {
-                            let events_per_screen = (content_height / 4).max(1); // roughly 4 lines per game
-                            let end_event = (start_event + events_per_screen * 2).min(filtered_events.len());
-                            &filtered_events[start_event..end_event]
-                        } else {
-                            &filtered_events[..]
-                        };
-                        
-                        // left column
-                        let left_events: Vec<_> = visible_events.iter()
-                            .enumerate()
-                            .filter(|(i, _)| i % 2 == 0)
-                            .map(|(_, event)| *event)
-                            .collect();
-                        
-                        let mut left_lines = Vec::new();
-                        for event in left_events {
-                            let game_lines = app.format_game_block(event);
-                            for line in game_lines {
-                                left_lines.push(line);
-                            }
-                            left_lines.push("".to_string()); // spacer between games
-                        }
-                        
-                        let left_items: Vec<ListItem> = left_lines.iter()
-                            .map(|line| {
-                                let style = get_line_style(line);
-                                ListItem::new(Line::from(vec![
-                                    Span::styled(line.clone(), style),
-                                ]).alignment(Alignment::Center))
-                            })
-                            .collect();
-
-                        let left_title = if needs_scrolling {
-                            format!(" games ({}/{}) ", start_event + 1, filtered_events.len())
-                        } else {
-                            " games ".to_string()
-                        };
-
-                        let left_list = List::new(left_items)
-                            .block(Block::default().borders(Borders::RIGHT).title(left_title))
-                            .style(Style::default().fg(Color::White));
-                        f.render_widget(left_list, game_chunks[0]);
-
-                        // right column
-                        let right_events: Vec<_> = visible_events.iter()
-                            .enumerate()
-                            .filter(|(i, _)| i % 2 == 1)
-                            .map(|(_, event)| *event)
-                            .collect();
-                        
-                        let mut right_lines = Vec::new();
-                        for event in right_events {
-                            let game_lines = app.format_game_block(event);
-                            for line in game_lines {
-                                right_lines.push(line);
-                            }
-                            right_lines.push("".to_string()); // spacer between games
-                        }
-                        
-                        let right_items: Vec<ListItem> = right_lines.iter()
-                            .map(|line| {
-                                let style = get_line_style(line);
-                                ListItem::new(Line::from(vec![
-                                    Span::styled(line.clone(), style),
-                                ]).alignment(Alignment::Center))
-                            })
-                            .collect();
-
-                        let right_list = List::new(right_items)
-                            .block(Block::default().borders(Borders::LEFT))
-                            .style(Style::default().fg(Color::White));
-                        f.render_widget(right_list, game_chunks[1]);
-                        
-                    } else {
-                        // single column layout (centered) with scrolling support
-                        let total_lines = all_lines.len();
-                        let visible_lines = if needs_scrolling {
-                            let start = app.scroll_offset;
-                            let end = (start + content_height).min(total_lines);
-                            all_lines[start..end].to_vec()
-                        } else {
-                            all_lines
-                        };
-
-                        let game_items: Vec<ListItem> = visible_lines.iter()
-                            .map(|line| {
-                                let style = get_line_style(line);
-                                ListItem::new(Line::from(vec![
-                                    Span::styled(line.clone(), style),
-                                ]).alignment(Alignment::Center))
-                            })
-                            .collect();
-
-                        let title = if needs_scrolling {
-                            format!(" games ({}/{}) ", 
-                                app.scroll_offset + 1, 
-                                total_lines.saturating_sub(content_height).max(1)
-                            )
-                        } else {
-                            " games ".to_string()
-                        };
-
-                        let games_list = List::new(game_items)
-                            .block(Block::default().borders(Borders::ALL).title(title))
-                            .style(Style::default().fg(Color::White));
-                        f.render_widget(games_list, chunks[1]);
-                    }
-                }
-            }
-
-            // footer with refresh timer
-            let all_lines_count = app.get_scrollable_lines().len();
-            let show_scroll_help = all_lines_count > content_height || 
-                                 (can_fit_two_columns && filtered_events.len() > (content_height / 4) * 2);
-            
-            let time_left = app.time_until_next_refresh().as_secs();
-            let scroll_text = if show_scroll_help { " | ↑/↓ - scroll" } else { "" };
-            let footer_text = format!("q - quit | r - refresh{} | next: {}s", scroll_text, time_left);
-            
-            let footer = Paragraph::new(footer_text)
+    // main content
+    if let Some(ref error) = app.error_message {
+        let error_msg = Paragraph::new(format!("error: {}", error))
+            .style(Style::default().fg(Color::Red))
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL));
+            f.render_widget(error_msg, chunks[1]);
+        } else {
+            if filtered_events.is_empty() {
+                let no_games = Paragraph::new("no games found :c")
                 .style(Style::default().fg(Color::Gray))
                 .alignment(Alignment::Center)
                 .block(Block::default().borders(Borders::ALL));
-            f.render_widget(footer, chunks[2]);
-        })?;
-
-        // handle input with timeout for refresh checking
-        if event::poll(Duration::from_millis(500))? {
-            if let Event::Key(key) = event::read()? {
-                match key.code {
-                    KeyCode::Char('q') => break,
-                    KeyCode::Char('r') => {
-                        // manual refresh
-                        if let Err(e) = app.fetch_data().await {
-                            app.error_message = Some(format!("refresh failed: {}", e));
+                f.render_widget(no_games, chunks[1]);
+            } else {
+                // check if we need scrolling
+                let all_lines = app.get_scrollable_lines();
+                let needs_scrolling = all_lines.len() > content_height;
+                
+                if can_fit_two_columns && filtered_events.len() > 1 {
+                    // two-column layout with scrolling support
+                    let game_chunks = Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+                        .split(chunks[1]);
+                    
+                    // get all events for scrolling
+                    let start_event = if needs_scrolling {
+                        (app.scroll_offset / 4).min(filtered_events.len().saturating_sub(1))
+                    } else {
+                        0
+                    };
+                    
+                    let visible_events = if needs_scrolling {
+                        let events_per_screen = (content_height / 4).max(1); // roughly 4 lines per game
+                        let end_event = (start_event + events_per_screen * 2).min(filtered_events.len());
+                        &filtered_events[start_event..end_event]
+                    } else {
+                        &filtered_events[..]
+                    };
+                    
+                    // left column
+                    let left_events: Vec<_> = visible_events.iter()
+                        .enumerate()
+                        .filter(|(i, _)| i % 2 == 0)
+                        .map(|(_, event)| *event)
+                        .collect();
+                    
+                    let mut left_lines = Vec::new();
+                    for event in left_events {
+                        let game_lines = app.format_game_block(event);
+                        for line in game_lines {
+                            left_lines.push(line);
                         }
+                        left_lines.push("".to_string()); // spacer between games
                     }
-                    KeyCode::Up => {
-                        app.scroll_up();
+                    
+                    let left_items: Vec<ListItem> = left_lines.iter()
+                        .map(|line| {
+                            let style = get_line_style(line);
+                            ListItem::new(Line::from(vec![
+                                Span::styled(line.clone(), style),
+                            ]).alignment(Alignment::Center))
+                        })
+                        .collect();
+
+                    let left_title = if needs_scrolling {
+                        format!(" games ({}/{}) ", start_event + 1, filtered_events.len())
+                    } else {
+                        " games ".to_string()
+                    };
+
+                    let left_list = List::new(left_items)
+                        .block(Block::default().borders(Borders::RIGHT).title(left_title))
+                        .style(Style::default().fg(Color::White));
+                    f.render_widget(left_list, game_chunks[0]);
+
+                    // right column
+                    let right_events: Vec<_> = visible_events.iter()
+                        .enumerate()
+                        .filter(|(i, _)| i % 2 == 1)
+                        .map(|(_, event)| *event)
+                        .collect();
+                    
+                    let mut right_lines = Vec::new();
+                    for event in right_events {
+                        let game_lines = app.format_game_block(event);
+                        for line in game_lines {
+                            right_lines.push(line);
+                        }
+                        right_lines.push("".to_string()); // spacer between games
                     }
-                    KeyCode::Down => {
-                        let content_height = terminal.size()?.height.saturating_sub(8); // account for header/footer
-                        app.scroll_down(content_height as usize);
-                    }
-                    _ => {}
+                    
+                    let right_items: Vec<ListItem> = right_lines.iter()
+                        .map(|line| {
+                            let style = get_line_style(line);
+                            ListItem::new(Line::from(vec![
+                                Span::styled(line.clone(), style),
+                            ]).alignment(Alignment::Center))
+                        })
+                        .collect();
+
+                    let right_list = List::new(right_items)
+                        .block(Block::default().borders(Borders::LEFT))
+                        .style(Style::default().fg(Color::White));
+                    f.render_widget(right_list, game_chunks[1]);
+                    
+                } else {
+                    // single column layout (centered) with scrolling support
+                    let total_lines = all_lines.len();
+                    let visible_lines = if needs_scrolling {
+                        let start = app.scroll_offset;
+                        let end = (start + content_height).min(total_lines);
+                        all_lines[start..end].to_vec()
+                    } else {
+                        all_lines
+                    };
+
+                    let game_items: Vec<ListItem> = visible_lines.iter()
+                        .map(|line| {
+                            let style = get_line_style(line);
+                            ListItem::new(Line::from(vec![
+                                Span::styled(line.clone(), style),
+                            ]).alignment(Alignment::Center))
+                        })
+                        .collect();
+
+                    let title = if needs_scrolling {
+                        format!(" games ({}/{}) ", 
+                            app.scroll_offset + 1, 
+                            total_lines.saturating_sub(content_height).max(1)
+                        )
+                    } else {
+                        " games ".to_string()
+                    };
+
+                    let games_list = List::new(game_items)
+                        .block(Block::default().borders(Borders::ALL).title(title))
+                        .style(Style::default().fg(Color::White));
+                    f.render_widget(games_list, chunks[1]);
                 }
             }
         }
+
+        // footer with refresh timer
+        let all_lines_count = app.get_scrollable_lines().len();
+        let show_scroll_help = all_lines_count > content_height || 
+                             (can_fit_two_columns && filtered_events.len() > (content_height / 4) * 2);
+        
+        let time_left = app.time_until_next_refresh().as_secs();
+        let scroll_text = if show_scroll_help { " | ↑/↓ - scroll" } else { "" };
+        let footer_text = format!("q - quit | r - refresh{} | next: {}s", scroll_text, time_left);
+        
+        let footer = Paragraph::new(footer_text)
+            .style(Style::default().fg(Color::Gray))
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL));
+        f.render_widget(footer, chunks[2]);
+    })?;
+
+    // handle input with timeout for refresh checking
+    if event::poll(Duration::from_millis(500))? {
+        if let Event::Key(key) = event::read()? {
+            match key.code {
+                KeyCode::Char('q') => break,
+                KeyCode::Char('r') => {
+                    // manual refresh
+                    if let Err(e) = app.fetch_data().await {
+                        app.error_message = Some(format!("refresh failed: {}", e));
+                    }
+                }
+                KeyCode::Up => {
+                    app.scroll_up();
+                }
+                KeyCode::Down => {
+                    let content_height = terminal.size()?.height.saturating_sub(8); // account for header/footer
+                    app.scroll_down(content_height as usize);
+                }
+                _ => {}
+            }
+        }
     }
+}
 
-    // cleanup
-    disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
-    terminal.show_cursor()?;
+// cleanup
+disable_raw_mode()?;
+execute!(
+    terminal.backend_mut(),
+    LeaveAlternateScreen,
+    DisableMouseCapture
+)?;
+terminal.show_cursor()?;
 
-    Ok(())
+Ok(())
 }
 
 fn get_line_style(line: &str) -> Style {
-    if line.contains("🔴 live") {
-        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
-    } else if line.contains("final") {
-        Style::default().fg(Color::Green)
-    } else if line.is_empty() {
-        Style::default()
-    } else {
-        Style::default().fg(Color::White)
-    }
+if line.contains("live") {
+    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)
+} else if line.contains("final") {
+    Style::default().fg(Color::Green)
+} else if line.is_empty() {
+    Style::default()
+} else {
+    Style::default().fg(Color::White)
+}
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    let matches = Command::new("scrbrd")
-        .version("1.0")
-        .author("Chuck Swung")
-        .about("A minimal terminal sports scoreboard using ESPN API")
-        .arg(
-            Arg::new("league")
-                .short('l')
-                .long("league")
-                .value_name("LEAGUE")
-                .help("League: mlb, nba, wnba, nfl, nhl, mls, nwsl, premier")
-                .required(true)
-        )
-        .arg(
-            Arg::new("team")
-                .short('t')
-                .long("team")
-                .value_name("TEAM")
-                .help("Filter by team name")
-        )
-        .get_matches();
+let matches = Command::new("scrbrd")
+    .version("0.1.0")
+    .author("Chuck Swung")
+    .about("A minimal terminal sports scoreboard using ESPN API")
+    .arg(
+        Arg::new("league")
+            .short('l')
+            .long("league")
+            .value_name("LEAGUE")
+            .help("League: mlb, nba, wnba, nfl, nhl, mls, nwsl, premier")
+            .required(true)
+    )
+    .arg(
+        Arg::new("team")
+            .short('t')
+            .long("team")
+            .value_name("TEAM")
+            .help("Filter by team name")
+    )
+    .get_matches();
 
-    let league = matches.get_one::<String>("league").unwrap().to_string();
-    let team = matches.get_one::<String>("team").map(|s| s.to_string());
-    
-    let mut app = AppState::new(league, team);
-    
-    // fetch initial data
-    match app.fetch_data().await {
-        Ok(()) => {},
-        Err(e) => {
-            app.error_message = Some(e.to_string());
-        }
+let league = matches.get_one::<String>("league").unwrap().to_string();
+let team = matches.get_one::<String>("team").map(|s| s.to_string());
+
+let mut app = AppState::new(league, team);
+
+// fetch initial data
+match app.fetch_data().await {
+    Ok(()) => {},
+    Err(e) => {
+        app.error_message = Some(e.to_string());
     }
+}
 
-    // render the UI with auto-refresh
-    render_scoreboard(&mut app).await?;
+// render the UI with auto-refresh
+render_scoreboard(&mut app).await?;
 
-    Ok(())
+Ok(())
 }
