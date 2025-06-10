@@ -15,7 +15,7 @@ use crossterm::{
 use std::{
     error::Error,
     io,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use serde::{Deserialize, Serialize};
 use tokio;
@@ -103,6 +103,8 @@ struct AppState {
     team_filter: Option<String>,
     error_message: Option<String>,
     scroll_offset: usize,
+    last_refresh: Instant,
+    is_refreshing: bool,
 }
 
 impl AppState {
@@ -113,10 +115,14 @@ impl AppState {
             team_filter: team,
             error_message: None,
             scroll_offset: 0,
+            last_refresh: Instant::now(),
+            is_refreshing: false,
         }
     }
 
     async fn fetch_data(&mut self) -> Result<(), Box<dyn Error>> {
+        self.is_refreshing = true;
+        
         let sport_code = match self.selected_league.to_lowercase().as_str() {
             "mlb" => "baseball/mlb",
             "nba" => "basketball/nba",
@@ -139,15 +145,30 @@ impl AppState {
             .await?;
 
         if !response.status().is_success() {
+            self.is_refreshing = false;
             return Err(format!("ESPN API error: {}", response.status()).into());
         }
 
         let espn_data: EspnResponse = response.json().await?;
         self.events = espn_data.events;
         self.error_message = None;
-        self.scroll_offset = 0; // reset scroll when new data is fetched
+        self.last_refresh = Instant::now();
+        self.is_refreshing = false;
         
         Ok(())
+    }
+
+    fn should_refresh(&self) -> bool {
+        self.last_refresh.elapsed() >= Duration::from_secs(30)
+    }
+
+    fn time_until_next_refresh(&self) -> Duration {
+        let elapsed = self.last_refresh.elapsed();
+        if elapsed >= Duration::from_secs(30) {
+            Duration::from_secs(0)
+        } else {
+            Duration::from_secs(30) - elapsed
+        }
     }
 
     fn get_filtered_events(&self) -> Vec<&GameEvent> {
@@ -301,7 +322,7 @@ impl AppState {
     }
 }
 
-fn render_scoreboard(app: &mut AppState) -> Result<(), Box<dyn Error>> {
+async fn render_scoreboard(app: &mut AppState) -> Result<(), Box<dyn Error>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -309,6 +330,13 @@ fn render_scoreboard(app: &mut AppState) -> Result<(), Box<dyn Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     loop {
+        // check if we need to auto-refresh
+        if app.should_refresh() && !app.is_refreshing {
+            if let Err(e) = app.fetch_data().await {
+                app.error_message = Some(format!("refresh failed: {}", e));
+            }
+        }
+
         terminal.draw(|f| {
             let chunks = Layout::default()
                 .direction(Direction::Vertical)
@@ -326,10 +354,16 @@ fn render_scoreboard(app: &mut AppState) -> Result<(), Box<dyn Error>> {
             let content_height = chunks[1].height.saturating_sub(2) as usize; // account for borders
             let can_fit_two_columns = content_width >= 80; // minimum width for two columns
 
-            // header
+            // header with refresh indicator
+            let refresh_indicator = if app.is_refreshing {
+                " ↻"
+            } else {
+                ""
+            };
+            
             let title = match &app.team_filter {
-                Some(team) => format!("{} - {}", app.selected_league.to_uppercase(), team.to_uppercase()),
-                None => format!("{} scrbrd", app.selected_league.to_lowercase()),
+                Some(team) => format!("{} - {}{}", app.selected_league.to_uppercase(), team.to_uppercase(), refresh_indicator),
+                None => format!("{} scrbrd{}", app.selected_league.to_lowercase(), refresh_indicator),
             };
             
             let header = Paragraph::new(title)
@@ -482,16 +516,14 @@ fn render_scoreboard(app: &mut AppState) -> Result<(), Box<dyn Error>> {
                 }
             }
 
-            // footer
+            // footer with refresh timer
             let all_lines_count = app.get_scrollable_lines().len();
             let show_scroll_help = all_lines_count > content_height || 
                                  (can_fit_two_columns && filtered_events.len() > (content_height / 4) * 2);
             
-            let footer_text = if show_scroll_help {
-                "q - quit | r - refresh | ↑/↓ - scroll"
-            } else {
-                "q - quit | r - refresh"
-            };
+            let time_left = app.time_until_next_refresh().as_secs();
+            let scroll_text = if show_scroll_help { " | ↑/↓ - scroll" } else { "" };
+            let footer_text = format!("q - quit | r - refresh{} | next: {}s", scroll_text, time_left);
             
             let footer = Paragraph::new(footer_text)
                 .style(Style::default().fg(Color::Gray))
@@ -500,14 +532,16 @@ fn render_scoreboard(app: &mut AppState) -> Result<(), Box<dyn Error>> {
             f.render_widget(footer, chunks[2]);
         })?;
 
-        // handle input with timeout for auto-refresh
-        if event::poll(Duration::from_millis(100))? {
+        // handle input with timeout for refresh checking
+        if event::poll(Duration::from_millis(500))? {
             if let Event::Key(key) = event::read()? {
                 match key.code {
                     KeyCode::Char('q') => break,
                     KeyCode::Char('r') => {
-                        // manual refresh - would trigger fetch_data
-                        continue;
+                        // manual refresh
+                        if let Err(e) = app.fetch_data().await {
+                            app.error_message = Some(format!("refresh failed: {}", e));
+                        }
                     }
                     KeyCode::Up => {
                         app.scroll_up();
@@ -582,8 +616,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    // render the UI
-    render_scoreboard(&mut app)?;
+    // render the UI with auto-refresh
+    render_scoreboard(&mut app).await?;
 
     Ok(())
 }
