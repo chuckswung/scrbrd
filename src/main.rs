@@ -666,7 +666,7 @@ if line.contains("live") {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
 let matches = Command::new("scrbrd")
-    .version("0.1.0")
+    .version("0.1.1")
     .author("Chuck Swung")
     .about("A minimal terminal sports scoreboard using ESPN API")
     .arg(
