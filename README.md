@@ -33,6 +33,7 @@ scrbrd -l mlb -t guardians
 - [ ] tweak ui
 - [ ] add club nicknames
 - [ ] add box scores and statistcs
+- [ ] fix innings parsing (missing end)
 
 ## contributing
 
