@@ -1,13 +1,13 @@
 [package]
 name = "scrbrd"
-version = "0.1.3"
+version = "0.2.0"
 edition = "2024"
 authors = ["Chuck Swung <chuckswung@gmail.com>"]
-description = "a minimal tui sports data tracker"
+description = "a tui sports tracker for real-time scores and status"
 license = "MIT"
 repository = "https://github.com/chuckswung/scrbrd"
 homepage = "https://github.com/chuckswung/scrbrd"
-keywords = ["sports", "scoreboard", "score", "terminal", "cli",]
+keywords = ["sports", "score", "scoreboard", "terminal", "cli", "tui"]
 categories = ["command-line-utilities"]
 readme = "README.md"
 

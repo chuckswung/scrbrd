@@ -6,7 +6,7 @@
 |___|___|_| |___|_| |___|
 </pre>
 
-a minimal tui sports data tracker.
+a tui sports tracker for real-time scores and status.
 
 written in rust with ratatui.
 
@@ -21,13 +21,13 @@ written in rust with ratatui.
 </p>
 </div>
 
-### about
+### About
 
 **scrbrd** is a fast, minimal, cli application for tracking live sports events in your terminal. it fetches data from espn's unofficial api and renders the information using [ratatui](https://ratatui.rs/) for a visually clean interface. 
 
 **scrbrd** parses and presents details such as current scores, inning/quarter/period, team records, schedules, and live status — all within a compact, readable tui format.
 
-### features
+### Features
 
 - live score display with real-time game data
 - league and team filtering
@@ -35,7 +35,7 @@ written in rust with ratatui.
 - auto-refresh and manual refresh support
 - clean, minimal terminal interface
 
-### built with
+### Built with
 
 - [rust](https://rust-lang.org/)
 - [ratatui](https://ratatui.rs/)
@@ -43,7 +43,7 @@ written in rust with ratatui.
 - [serde](https://serde.rs/)
 - [tokio](https://tokio.rs/)
 
-### installation
+### Installation
 
 **scrbrd** requires [rust with cargo](https://crates.io/) to run.
 
@@ -58,9 +58,9 @@ cargo install --git https://github.com/chuckswung/scrbrd
 ```
 
 
-### usage
+### Usage
 
-#### commands
+#### Commands
 ```
 # show league scores
 scrbrd -l <league>
@@ -72,11 +72,10 @@ scrbrd -l <league> -t <team>
 mlb, nba, wnba, nfl, nhl, mls, nwsl, prem
 
 # supported teams
-all of them! you'll have to use their full name (guardians, buccaneers, etc)
-club nicknames (guards, bucs, etc) are coming in a future update
+all of them! you can filter by team name (guardians) or city abbreviation (cle)
 ```
 
-#### controls
+#### Controls
 | Key | Action |
 |:----|:-------|
 | `↓` | scroll down |
@@ -84,13 +83,14 @@ club nicknames (guards, bucs, etc) are coming in a future update
 | `r` | force refresh |
 | `q` | quit  |
 
-### upcoming
+### Upcoming
 
-- [ ]  tweak ui
 - [ ]  add nicknames
-- [ ]  add box scores and stats
+- [ ]  enhance current display (add outs, downs, yardage, etc)
+- [ ]  add game day data (win %, weather, venue)
+- [ ]  add advanced statistics (box score, up to bat)
 
-### contributing
+### Contributing
 
 contributions are more than welcome! i'm still a rookie dev and would love to collaborate with other developers.
 
@@ -103,11 +103,11 @@ to contribute:
 
 bug reports, feature ideas, and feedback are appreciated via issues or discussions. 
 
-### license
+### License
 
 this project is licensed under the MIT license. see the <a href="./LICENSE">LICENSE</a> file for details.
 
-### author
+### Author
 
 Chuck Swung - [@chuckswung](https://github.com/chuckswung)
 
