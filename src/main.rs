@@ -436,7 +436,7 @@ async fn render_scoreboard(app: &mut AppState) -> Result<(), Box<dyn Error>> {
                 Constraint::Min(8),
                 Constraint::Length(3),
             ].as_ref())
-            .split(f.size());
+            .split(f.area());
 
             // calculate these variables at the top so they're in scope for the entire function
             let filtered_events = app.get_filtered_events();
