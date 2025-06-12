@@ -7,7 +7,7 @@ description = "a tui sports tracker for real-time scores and status"
 license = "MIT"
 repository = "https://github.com/chuckswung/scrbrd"
 homepage = "https://github.com/chuckswung/scrbrd"
-keywords = ["sports", "score", "scoreboard", "terminal", "cli", "tui"]
+keywords = ["sports", "score", "terminal", "cli", "tui"]
 categories = ["command-line-utilities"]
 readme = "README.md"
 
