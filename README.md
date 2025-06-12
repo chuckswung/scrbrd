@@ -13,8 +13,8 @@ written in rust with ratatui.
 <a href="#installation">install</a> | <a href="https://coff.ee/chuckswung">bmac</a>
 <br>
 
-<a href="https://i.imgur.com/v2QoPb5.png" target="_blank">
-    <img src="https://i.imgur.com/v2QoPb5.png" width="666">
+<a href="https://i.imgur.com/F1BKjjn.png" target="_blank">
+    <img src="https://i.imgur.com/F1BKjjn.png" width="666" alt="a linux desktop showcasing multiple terminals of various sizes using scrbrd">
 </a>
 <p align="center">
 <sup><sub>screenshot also features <a href="https://gitlab.com/jallbrit/cbonsai">cbonsai</a> by john allbritten.</sub></sup>
