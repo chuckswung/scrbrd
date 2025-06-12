@@ -393,10 +393,17 @@ impl AppState {
                 }
             }
             
-            // look for "mid 3rd" or similar
+            // look for "mid 3rd" or similar to signify middle of inning
             if source_lower.contains("mid") {
                 if let Some(inning) = extract_inning_number(&source_lower) {
                     return Some(format!("M{}", inning));
+                }
+            }
+
+            // look for "end 3rd" or similar to signify end of inning
+            if source_lower.contains("end") {
+                if let Some(inning) = extract_inning_number(&source_lower) {
+                    return Some(format!("E{}", inning));
                 }
             }
         }
@@ -606,7 +613,7 @@ async fn render_scoreboard(app: &mut AppState) -> Result<(), Box<dyn Error>> {
         
         let time_left = app.time_until_next_refresh().as_secs();
         let scroll_text = if show_scroll_help { " | ↑/↓ - scroll" } else { "" };
-        let footer_text = format!("q - quit | r - refresh{} | next: {}s", scroll_text, time_left);
+        let footer_text = format!("q - quit | r - refresh{} | next - {}", scroll_text, time_left);
         
         let footer = Paragraph::new(footer_text)
             .style(Style::default().fg(Color::Gray))
